@@ -74,6 +74,8 @@ static void decon_set_protected_content(struct decon_device *decon,
 static atomic_t extra_vsync_wait;
 #endif /* CCONFIG_USE_VSYNC_SKIP */
 
+#ifdef CONFIG_DECON_SYSTRACE
+
 #define SYSTRACE_C_BEGIN(a) do { \
 	decon->tracing_mark_write(decon->systrace_pid, 'C', a, 1);	\
 	} while(0)
@@ -88,13 +90,21 @@ static atomic_t extra_vsync_wait;
 
 /*----------------- function for systrace ---------------------------------*/
 /* history (1): 15.11.10
+* to make stamp in systrace, we can use trace_printk()/trace_puts().
+* but, when we tested them, this function-name is inserted in front of all systrace-string.
+* it make disable to recognize by systrace.
+* example log : decon0-1831  ( 1831) [001] ....   681.732603: decon_update_regs: tracing_mark_write: B|1831|decon_fence_wait
+* systrace error : /sys/kernel/debug/tracing/trace_marker: Bad file descriptor (9)
+* solution : make function-name to 'tracing_mark_write'
+*
+* history (2): 15.11.10
 * if we make argument to current-pid, systrace-log will be duplicated in Surfaceflinger as systrace-error.
 * example : EventControl-3184  ( 3066) [001] ...1    53.870105: tracing_mark_write: B|3066|eventControl\n\
 *           EventControl-3184  ( 3066) [001] ...1    53.870120: tracing_mark_write: B|3066|eventControl\n\
 *           EventControl-3184  ( 3066) [001] ....    53.870164: tracing_mark_write: B|3184|decon_DEactivate_vsync_0\n\
 * solution : store decon0's pid to static-variable.
 *
-* history (2) : 15.11.11
+* history (3) : 15.11.11
 * all code is registred in decon srtucture.
 */
 
@@ -117,7 +127,11 @@ static void tracing_mark_write( int pid, char id, char* str1, int value )
 		decon_err( "%s:argument fail\n", __func__ );
 		return;
 	}
+
+	trace_puts(buf);
 }
+#endif
+
 /*-----------------------------------------------------------------*/
 
 void decon_dump(struct decon_device *decon)
@@ -2462,10 +2476,12 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 	int vsync_wait_cnt = 0;
 #endif /* CONFIG_USE_VSYNC_SKIP */
 
+#ifdef CONFIG_DECON_SYSTRACE
 	if (!decon->systrace_pid)
 		decon->systrace_pid = current->pid;
 
 	decon->tracing_mark_write(decon->systrace_pid, 'B', "decon_update_regs", 0);
+#endif
 
 	if (decon->state == DECON_STATE_LPD)
 		decon_exit_lpd(decon);
@@ -2479,7 +2495,9 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 			decon->pdata->max_win *
 			MAX_BUF_PLANE_CNT);
 
+#ifdef CONFIG_DECON_SYSTRACE
 	decon->tracing_mark_write(decon->systrace_pid, 'B', "decon_fence_wait", 0);
+#endif
 
 	for (i = 0; i < decon->pdata->max_win; i++) {
 		for (j = 0; j < MAX_BUF_PLANE_CNT; ++j)
@@ -2491,7 +2509,9 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 		}
 	}
 
+#ifdef CONFIG_DECON_SYSTRACE
 	decon->tracing_mark_write(decon->systrace_pid, 'E', "decon_fence_wait", 0);
+#endif
 
 	if (decon->prev_bw != regs->bandwidth)
 		decon_set_qos(decon, regs, false, false);
@@ -2565,7 +2585,9 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 	if (decon->prev_bw != regs->bandwidth)
 		decon_set_qos(decon, regs, true, false);
 
+#ifdef CONFIG_DECON_SYSTRACE
 	decon->tracing_mark_write(decon->systrace_pid, 'E', "decon_update_regs", 0);
+#endif
 }
 
 static void decon_update_regs_handler(struct kthread_work *work)
@@ -2584,11 +2606,15 @@ static void decon_update_regs_handler(struct kthread_work *work)
 	mutex_unlock(&decon->update_regs_list_lock);
 
 	list_for_each_entry_safe(data, next, &saved_list, list) {
+#ifdef CONFIG_DECON_SYSTRACE
 		decon->tracing_mark_write(decon->systrace_pid, 'C', "update_regs_list", decon->update_regs_list_cnt);
+#endif
 		decon_update_regs(decon, data);
 		decon_lpd_unblock(decon);
 		list_del(&data->list);
+#ifdef CONFIG_DECON_SYSTRACE
 		decon->tracing_mark_write(decon->systrace_pid, 'C', "update_regs_list", --decon->update_regs_list_cnt);
+#endif
 		kfree(data);
 	}
 }
@@ -4336,11 +4362,13 @@ static int decon_probe(struct platform_device *pdev)
 	mutex_init(&decon->output_lock);
 	mutex_init(&decon->mutex);
 
+#ifdef CONFIG_DECON_SYSTRACE
 	/* systrace */
 	decon->systrace_pid = 0;
 	decon->tracing_mark_write = tracing_mark_write;
 	decon->update_regs_list_cnt = 0;
 	decon->tracing_mark_write(decon->systrace_pid, 'C', "update_regs_list", decon->update_regs_list_cnt);
+#endif
 
 	/* init work thread for update registers */
 	INIT_LIST_HEAD(&decon->update_regs_list);

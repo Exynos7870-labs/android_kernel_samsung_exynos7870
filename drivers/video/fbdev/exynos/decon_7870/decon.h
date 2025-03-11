@@ -722,9 +722,10 @@ struct decon_device {
 #endif
 	unsigned int			disp_dump;
 
+#ifdef CONFIG_DECON_SYSTRACE
 	int systrace_pid;
 	void	(*tracing_mark_write)( int pid, char id, char* str1, int value);
-
+#endif
 	int 			update_regs_list_cnt;
 
 #if defined(CONFIG_EXYNOS_SUPPORT_FB_HANDOVER)
